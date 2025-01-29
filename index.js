@@ -1,159 +1,121 @@
 const mineflayer = require('mineflayer');
 const axios = require('axios');
-const { Client } = require('discord.js');
 const readline = require('readline');
 const SocksProxyAgent = require('socks-proxy-agent');
 
-physicsEnabled=true
-
-// ProxyScrape'den proxy çekme fonksiyonu
+// Proxy Listesini Çek
 async function getProxies() {
   try {
     const response = await axios.get('https://www.proxyscrape.com/api/v2/proxies?request=displayproxies&protocol=socks4');
     return response.data.split('\n').map(line => line.trim()).filter(line => line !== '');
   } catch (error) {
-    throw new Error('Proxy çekme hatası: ' + error.message);
+    console.log('Proxy çekme hatası: ' + error.message);
+    return [];
   }
 }
 
-// Konsol üzerinden giriş alma
+// Konsol Arayüzü
 const rl = readline.createInterface({
   input: process.stdin,
   output: process.stdout
 });
 
-console.log("Bot Başlatma Seçeneği:");
-console.log("1. Konsoldan Bot Sokma");
-console.log("2. Discord Üzerinden Başlat");
-
-rl.question('Seçim yapın (1 veya 2): ', function (seçim) {
-  if (seçim === '1') {
-    rl.question('Sunucu IP adresini girin: ', function (host) {
-      rl.question('Sunucu portunu girin: ', function (port) {
-        rl.question('Bot sayısını girin: ', function (botSayısı) {
-          rl.question('Discord Bot Tokenini girin: ', function (discordToken) {
-            console.log('Minecraft Botları Başlatılıyor...');
-            getProxies().then((proxies) => {
-              for (let i = 1; i <= botSayısı; i++) {
-                const proxy = proxies[i % proxies.length]; // Her bot için farklı bir proxy
-                startMinecraftBot(host, port, `Anyaz_PKG${i}`, proxy);
-              }
-            }).catch(err => {
-              console.log("Proxy çekme hatası:", err);
-            });
-
-            // Discord botu başlatılıyor
-            startDiscordBot(discordToken);
-          });
-        });
-      });
+rl.question('Sunucu IP: ', (host) => {
+  rl.question('Port: ', (port) => {
+    rl.question('Bot sayısı: ', (botSayısı) => {
+      startBots(host, port, botSayısı);
     });
-  } else if (seçim === '2') {
-    rl.question('Discord Bot Tokenini girin: ', function (discordToken) {
-      startDiscordBot(discordToken);
-      rl.close();
-    });
-  } else {
-    console.log('Geçersiz seçim.');
-    rl.close();
-  }
+  });
 });
 
-// Minecraft botu başlatma fonksiyonu
-function startMinecraftBot(host, port, username, proxy) {
+// Botları Başlat
+async function startBots(host, port, botSayısı) {
+  const proxies = await getProxies();
+  for (let i = 0; i < botSayısı; i++) {
+    const proxy = proxies[i % proxies.length];
+    createBot(host, port, `Bot_${i + 1}`, proxy);
+  }
+}
+
+// Bot Oluşturma
+function createBot(host, port, username, proxy) {
   const agent = new SocksProxyAgent(`socks4://${proxy}`);
   const bot = mineflayer.createBot({
-    host: host,
-    port: port,
-    username: username,
+    host,
+    port,
+    username,
     version: false,
-    agent: agent
+    agent,
+    physEnabled: true,
   });
 
   bot.on('spawn', () => {
-    console.log(`✅ ${username} oyuna bağlandı.`);
-    setInterval(() => randomChat(bot), 30000);  // Her 30 saniyede bir rastgele mesaj
+    console.log(`✅ ${username} sunucuya bağlandı.`);
+    setInterval(() => randomChat(bot), 30000);
+    performLogin(bot);
+    setInterval(() => bot.setControlState('jump', true), 3000);  // Zıplama
+    setInterval(() => bot.setControlState('forward', true), 2000);  // Hareket
+    setInterval(() => bot.setControlState('right', true), 1500); // Sağ Tıklama
+    setInterval(() => bot.setControlState('left', true), 1500); // Sol Tıklama
   });
 
-  bot.on('error', (err) => {
-    console.error('Minecraft Bot Hatası:', err);
-  });
-
-  bot.on('end', () => {
-    console.log(`Minecraft Botu ${username} sonlandı.`);
-    startMinecraftBot(host, port, username, proxy);  // Bot kapanınca yeniden başlat
+  bot.on('error', (err) => handleError(err, host, port, username, proxy));
+  bot.on('end', () => handleEnd(host, port, username, proxy));
+  bot.on('death', () => {
+    console.log(`${username} öldü, yeniden doğuyor...`);
+    bot.spawn();
   });
 
   bot.on('chat', (username, message) => {
     if (message.includes('EconReset')) {
-      console.log('EconReset hatası tespit edildi, bot yeniden başlatılıyor...');
+      console.log('EconReset hatası, yeniden başlatılıyor...');
       bot.quit();
-      startMinecraftBot(host, port, username, proxy); // Botu yeniden başlat
+      startBots(host, port, 1);
     }
-  });
-
-  // Botun hareket etmesini sağla
-  setInterval(() => {
-    if (bot.entity) {
-      bot.setControlState('jump', true);  // Zıpla
-      bot.setControlState('sprint', true);  // Koş
-      bot.setControlState('forward', true);  // İleri git
-      setTimeout(() => {
-        bot.setControlState('jump', false);
-        bot.setControlState('sprint', false);
-        bot.setControlState('forward', false);
-      }, 2000);  // Hareketi 2 saniye sürdür
-    }
-  }, 5000);
-
-  // Bot öldüğünde yeniden doğmasını sağla
-  bot.on('death', () => {
-    console.log(`${username} öldü, bot otomatik doğuyor...`);
-    bot.spawn(); // Yeniden doğma
   });
 }
 
-// Discord botu başlatma
-function startDiscordBot(token) {
-  const client = new Client();
-
-  client.once('ready', () => {
-    console.log('Discord Botu hazır!');
-    console.log(`Bot adı: ${client.user.tag}`);
+// Hata Yönetimi
+function handleError(err, host, port, username, proxy) {
+  console.log('Bot hatası:', err);
+  getProxies().then((proxies) => {
+    const newProxy = proxies[Math.floor(Math.random() * proxies.length)];
+    createBot(host, port, username, newProxy);
   });
-
-  client.on('message', message => {
-    if (message.content.startsWith('qbaşlat')) {
-      const args = message.content.split(' ');
-      const [_, host, port, botSayısı] = args;
-
-      if (host && port && botSayısı) {
-        message.channel.send('Minecraft botları başlatılıyor...');
-        getProxies().then((proxies) => {
-          for (let i = 1; i <= botSayısı; i++) {
-            const proxy = proxies[i % proxies.length];
-            startMinecraftBot(host, port, `Anyaz_PKG${i}`, proxy);
-          }
-        }).catch(err => {
-          message.channel.send('Proxy çekme hatası: ' + err.message);
-        });
-      } else {
-        message.channel.send('Geçersiz parametreler. Lütfen doğru formatta giriniz: qbaşlat sunucu-ip sunucu-port bot-sayısı');
-      }
-    }
-  });
-
-  client.login(token);
 }
 
-// Rastgele mesajlar gönderen fonksiyon
+// Bot Bitiminde Yeniden Başlatma
+function handleEnd(host, port, username, proxy) {
+  console.log(`${username} sonlandı. Yeniden başlatılıyor...`);
+  createBot(host, port, username, proxy);
+}
+
+// Rastgele Chat Mesajları
 function randomChat(bot) {
-  const messages = [
-    'Anyaz_PKG CrackİsOn!',
-    'CrackOn! Beta',
-    'not Ddos Protections Servers!'
-  ];
-
+  const messages = ['Anyaz_PKG CrackİsOn!', 'CrackOn! Beta', 'not Ddos Protections Servers!'];
   const message = messages[Math.floor(Math.random() * messages.length)];
   bot.chat(message);
-            }
+}
+
+// Login/Register İşlemi
+function performLogin(bot) {
+  const loginMessage = 'Crack!';
+  bot.chat(`/login ${loginMessage}`);
+  setTimeout(() => bot.chat(`/register ${loginMessage} ${loginMessage}`), 1000);
+}
+
+// Proxy Değiştirme
+async function getNewProxy() {
+  const proxies = await getProxies();
+  return proxies[Math.floor(Math.random() * proxies.length)];
+}
+
+// Proxy Listeyi Yönetme
+async function handleProxyRotation() {
+  const proxies = await getProxies();
+  if (proxies.length === 0) {
+    console.log('Proxy bulunamadı. Tekrar dene.');
+    return;
+  }
+  return proxies[Math.floor(Math.random() * proxies.length)];
+    }
