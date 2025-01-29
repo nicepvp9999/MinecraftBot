@@ -3,14 +3,24 @@ const axios = require('axios');
 const readline = require('readline');
 const SocksProxyAgent = require('socks-proxy-agent');
 
-// Proxy Listesini Çek
-async function getProxies() {
+// ScraperAPI'den proxy almak için fonksiyon
+async function getProxy() {
   try {
-    const response = await axios.get('https://www.proxyscrape.com/api/v2/proxies?request=displayproxies&protocol=socks4');
-    return response.data.split('\n').map(line => line.trim()).filter(line => line !== '');
+    const response = await axios.get('http://proxy-server.scraperapi.com:8001', {
+      params: {
+        api_key: 'fe2927e337c2c22c55641c3dcf096b78',  // ScraperAPI API anahtarınız
+        url: 'http://httpbin.org/ip'
+      }
+    });
+
+    if (response.data) {
+      const proxy = response.data.origin;
+      console.log(`Proxy alındı: ${proxy}`);
+      return proxy;
+    }
   } catch (error) {
-    console.log('Proxy çekme hatası: ' + error.message);
-    return [];
+    console.error('Proxy çekme hatası: ', error.message);
+    return null;
   }
 }
 
@@ -30,15 +40,23 @@ rl.question('Sunucu IP: ', (host) => {
 
 // Botları Başlat
 async function startBots(host, port, botSayısı) {
-  const proxies = await getProxies();
   for (let i = 0; i < botSayısı; i++) {
-    const proxy = proxies[i % proxies.length];
-    createBot(host, port, `Bot_${i + 1}`, proxy);
+    const proxy = await getProxy();
+    if (proxy) {
+      createBot(host, port, `Bot_${i + 1}`, proxy);
+    } else {
+      console.log(`Proxy alınamadı, ${i + 1}. bot başlatılamaz.`);
+    }
   }
 }
 
 // Bot Oluşturma
 function createBot(host, port, username, proxy) {
+  if (!proxy) {
+    console.log('Proxy alınamadı, bot başlatılamaz.');
+    return;
+  }
+
   const agent = new SocksProxyAgent(`socks4://${proxy}`);
   const bot = mineflayer.createBot({
     host,
@@ -78,16 +96,17 @@ function createBot(host, port, username, proxy) {
 // Hata Yönetimi
 function handleError(err, host, port, username, proxy) {
   console.log('Bot hatası:', err);
-  getProxies().then((proxies) => {
-    const newProxy = proxies[Math.floor(Math.random() * proxies.length)];
-    createBot(host, port, username, newProxy);
+  getProxy().then((proxy) => {
+    createBot(host, port, username, proxy);
   });
 }
 
 // Bot Bitiminde Yeniden Başlatma
 function handleEnd(host, port, username, proxy) {
   console.log(`${username} sonlandı. Yeniden başlatılıyor...`);
-  createBot(host, port, username, proxy);
+  getProxy().then((proxy) => {
+    createBot(host, port, username, proxy);
+  });
 }
 
 // Rastgele Chat Mesajları
@@ -102,20 +121,4 @@ function performLogin(bot) {
   const loginMessage = 'Crack!';
   bot.chat(`/login ${loginMessage}`);
   setTimeout(() => bot.chat(`/register ${loginMessage} ${loginMessage}`), 1000);
-}
-
-// Proxy Değiştirme
-async function getNewProxy() {
-  const proxies = await getProxies();
-  return proxies[Math.floor(Math.random() * proxies.length)];
-}
-
-// Proxy Listeyi Yönetme
-async function handleProxyRotation() {
-  const proxies = await getProxies();
-  if (proxies.length === 0) {
-    console.log('Proxy bulunamadı. Tekrar dene.');
-    return;
-  }
-  return proxies[Math.floor(Math.random() * proxies.length)];
-    }
+                }
