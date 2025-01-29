@@ -1,0 +1,2 @@
+# MinecraftBot
+Not Afk Bot
